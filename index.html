@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+
+<script src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+
+<head>
+  <style>
+    #loader {
+      border: 16px solid #f3f3f3;
+      /* Light grey */
+      border-top: 16px solid #3498db;
+      /* Blue */
+      border-radius: 50%;
+      width: 200px;
+      height: 200px;
+      margin: 35vh auto;
+      animation: spin 2s linear infinite;
+    }
+
+    .svgRect {
+      stroke: none;
+      fill: #69b3a2;
+    }
+
+    .svgRect:hover {
+      fill: orange;
+    }
+
+    select {
+      width: 22%;
+      font-size: 25px;
+    }
+
+    #title {
+      text-align: center;
+      font-size: 40px;
+      font-weight: bold;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    .chart {
+      display: none;
+      padding: 0 10%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loader"></div>
+
+  <p id="title"></p>
+
+  <div class="chart">
+    <select id="selectYear"></select>
+    <svg id="byYear" viewBox="0 0 960 500"></svg>
+  </div>
+
+  <div class="chart">
+    <select id="selectCase"></select>
+    <svg id="byCase" viewBox="0 0 960 500"></svg>
+  </div>
+
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <script>
+    function calculateTotal(data) {
+      compileData = []
+
+      data.forEach((item, i) => {
+        let val = item.level_2
+
+        let index = compileData.findIndex(function(item2, i) {
+          return item2.case === val
+        });
+
+        if (index === -1) {
+          compileData.push({
+            'case': val,
+            'total': parseInt(item.value)
+          })
+        } else {
+          compileData[index]['total'] += parseInt(item.value)
+        }
+      });
+
+      return compileData
+    }
+
+    function drawYearChart(dataSet, chart, xScale, yScale, height, width, title) {
+      document.getElementById("title").innerHTML = title;
+      //yScale domain needs to change based on data set
+      yScale.domain([0, Math.max.apply(Math, dataSet.map(function(o) {
+          return o.total;
+        }))])
+        .rangeRound([height, 0]);
+
+      chart.select("g .year-y")
+        .transition()
+        .duration(1000)
+        .call(d3.axisLeft(yScale));
+
+      let tooltip = d3.select('.tooltip-area')
+        .style('opacity', 0);
+
+      const mouseover = (event, d) => {
+        tooltip.style("opacity", 1);
+      };
+
+      const mouseleave = (event, d) => {
+        tooltip.style('opacity', 0);
+      }
+
+      const mousemove = (event, d) => {
+        const text = d3.select('.tooltip-area__text');
+        text.text(`${d.total} cases`);
+        const [x, y] = d3.pointer(event);
+        tooltip
+          .attr('transform', `translate(20, 20)`);
+      };
+
+      chart.selectAll("rect")
+        .data(dataSet)
+        .join(
+          enter => enter
+          .append("rect")
+          .attr("x", d => xScale(d.case))
+          .attr("y", d => yScale(d.total))
+          .attr("width", 0)
+          .attr("height", 0)
+          .attr("class", "svgRect")
+          .call(enter => enter.transition()
+            .duration(1000)
+            .attr("width", xScale.bandwidth())
+            .attr("height", d => height - yScale(d.total))
+          ),
+          update => update
+          .call(update => update.transition()
+            .duration(1000)
+            .attr("x", d => xScale(d.case))
+            .attr("y", d => yScale(d.total))
+            .attr("width", xScale.bandwidth())
+            .attr("height", d => height - yScale(d.total))
+          ),
+          exit => exit
+          .call(exit => exit.transition()
+            .duration(1000)
+            .attr("width", 0)
+            .attr("height", 0)
+            .remove()
+          )
+        )
+        .on("mousemove", mousemove)
+        .on("mouseleave", mouseleave)
+        .on("mouseover", mouseover);
+    }
+
+    async function fetchDataSet() {
+      const response = await fetch('https://data.gov.sg/api/action/datastore_search?resource_id=83c21090-bd19-4b54-ab6b-d999c251edcf');
+      const data = await response.json();
+      return data
+    }
+
+    fetchDataSet().then(data => {
+      dataSet = data['result']['records']
+      console.log(dataSet)
+      document.getElementById("loader").style.display = "none";
+      document.getElementsByClassName("chart")[0].style.display = "block";
+      document.getElementsByClassName("chart")[1].style.display = "block";
+
+      let totalData = calculateTotal(dataSet)
+      console.log(totalData)
+
+      var allYear = dataSet.map(function(d) {
+        return (d.year)
+      })
+
+      first = ["Total"]
+
+      var setYear = new Set(first.concat(allYear.sort()));
+      var lastValue = Array.from(setYear).pop();
+
+      // add the options to the button
+      d3.select("#selectYear")
+        .selectAll('myOptions')
+        .data(setYear)
+        .enter()
+        .append('option')
+        .text(function(d) {
+          return d;
+        }) // text showed in the menu
+        .attr("value", function(d) {
+          return d;
+        })
+
+      let margin = {
+          top: 20,
+          right: 100,
+          bottom: 100,
+          left: 80
+        },
+        width = 960 - margin.left - margin.right,
+        height = 500 - margin.top - margin.bottom;
+
+      let yearChart = d3.select("#byYear")
+        .append("g")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // Add scales
+      let xYear = d3.scaleBand()
+        .domain(totalData.map(function(d) {
+          return d.case;
+        }))
+        .rangeRound([0, width])
+        .padding(0.1);
+
+      let yYear = d3.scaleLinear()
+        .domain([0, Math.max.apply(Math, totalData.map(function(o) {
+          return o.total;
+        }))])
+        .rangeRound([height, 0]);
+
+      // Add x-axis
+      yearChart.append("g")
+        .attr("class", "axis year-x")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(xYear))
+        .selectAll("text")
+        .attr("transform", "translate(-10,0)rotate(-45)")
+        .style("text-anchor", "end");
+
+      // Add y-axis
+      yearChart.append("g")
+        .attr("class", "axis year-y")
+        .call(d3.axisLeft(yYear).ticks(10));
+
+      yearChart.append("g")
+        .attr("class", "tooltip-area");
+
+      yearChart.select("g .tooltip-area")
+        .append("text")
+        .attr("class", "tooltip-area__text");
+
+      drawYearChart(totalData, yearChart, xYear, yYear, height, width, "Total Cases, Year: " + [...setYear][1] + " - " + lastValue);
+
+      d3.select("#selectYear").on("change", function(d) {
+        var selectedOption = d3.select(this).property("value")
+
+        var dataFilter = dataSet.filter(function(d) {
+          return d.year == selectedOption
+        })
+
+        if (dataFilter.length === 0) {
+          drawYearChart(totalData, yearChart, xYear, yYear, height, width, "Total Cases, Year: " + [...setYear][1] + " - " + lastValue);
+        } else {
+          filter_data_set = calculateTotal(dataFilter)
+          drawYearChart(filter_data_set, yearChart, xYear, yYear, height, width, "Total Cases, Year: " + dataFilter[0].year);
+        }
+
+      })
+
+      let caseChart = d3.select("#byCase")
+        .append("g")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // List of groups (here I have one group per column)
+      let allGroup = dataSet.map(function(d) {
+        return (d.level_2)
+      })
+
+      // add the options to the button
+      d3.select("#selectCase")
+        .selectAll('myOptions')
+        .data([...new Set(allGroup)])
+        .enter()
+        .append('option')
+        .text(function(d) {
+          return d;
+        }) // text showed in the menu
+        .attr("value", function(d) {
+          return d;
+        })
+
+      // A color scale: one color for each group
+      let myColor = d3.scaleOrdinal()
+        .domain(allGroup)
+        .range(d3.schemeSet2);
+
+      // Add Y axis
+      let y = d3.scaleLinear()
+        .domain([0, Math.max.apply(Math, dataSet.filter(function(d) {
+          return d.level_2 == allGroup[0]
+        }).map(function(o) {
+          return o.value;
+        }))])
+        .range([height, 0]);
+      caseChart.append("g")
+        .call(d3.axisLeft(y));
+
+      let x = d3.scaleLinear()
+        .domain(d3.extent(dataSet, function(d) {
+          return d.year;
+        }))
+        .range([0, width]);
+      caseChart.append("g")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(x).ticks(8));
+
+      // Initialize line with first group of the list
+      let line = caseChart
+        .append('g')
+        .append("path")
+        .datum(dataSet.filter(function(d) {
+          return d.level_2 == allGroup[0]
+        }))
+        .attr("d", d3.line()
+          .x(function(d) {
+            return x(d.year)
+          })
+          .y(function(d) {
+            return y(d.value)
+          })
+        )
+        .attr("stroke", function(d) {
+          return myColor("valueA")
+        })
+        .style("stroke-width", 4)
+        .style("fill", "none")
+
+      d3.select("#selectCase").on("change", function(d) {
+        let selectedOption = d3.select(this).property("value")
+
+        let caseFilter = dataSet.filter(function(d) {
+          return d.level_2 == selectedOption
+        })
+
+        // update Y axis
+        y
+          .domain([0, Math.max.apply(Math, caseFilter.map(function(o) {
+            return o.value;
+          }))])
+          .range([height, 0]);
+        caseChart.select("g").call(d3.axisLeft(y));
+
+        line
+          .datum(caseFilter)
+          .transition()
+          .duration(1000)
+          .attr("d", d3.line()
+            .x(function(d) {
+              return x(d.year)
+            })
+            .y(function(d) {
+              return y(d.value)
+            })
+          )
+          .attr("stroke", function(d) {
+            return myColor(selectedOption)
+          })
+      })
+    });
+  </script>
+</body>
+
+</html>
